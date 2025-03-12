@@ -2,6 +2,7 @@
 #define _CRT_NONSTDC_NO_DEPRECATE
 #endif
 #include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 #define CVKM_NO
@@ -20,11 +21,32 @@ typedef struct Orbiter {
   float height, distance, speed;
 } Orbiter;
 
+typedef struct firework_phase_t {
+  Color* colors;
+  vkm_vec3 min_velocity, max_velocity;
+  float min_lifespan, max_lifespan, min_size, max_size;
+  uint16_t colors_count, min_particles, max_particles;
+} firework_phase_t;
+
+typedef struct Firework {
+  firework_phase_t* phases;
+  uint32_t phases_count;
+} Firework;
+
+typedef struct FireworkParticle {
+  uint16_t phase;
+} FireworkParticle;
+
+typedef int32_t ShouldFadeAway;
+
 static ECS_COMPONENT_DECLARE(Lifetime);
 static ECS_COMPONENT_DECLARE(Lifespan);
 static ECS_COMPONENT_DECLARE(Size);
 static ECS_COMPONENT_DECLARE(Orbiter);
 static ECS_TAG_DECLARE(LookingAt);
+static ECS_COMPONENT_DECLARE(Firework);
+static ECS_COMPONENT_DECLARE(FireworkParticle);
+static ECS_COMPONENT_DECLARE(ShouldFadeAway);
 
 ECS_CTOR(Lifetime, ptr, {
   *ptr = 0.0f;
@@ -41,13 +63,38 @@ ECS_CTOR(Size, ptr, {
 ECS_CTOR(Orbiter, ptr, {
   *ptr = (Orbiter){
     .height = 3.0f,
-    .distance = 15.0f,
+    .distance = 20.0f,
     .speed = 0.25f,
   };
 })
 
-static float random() {
-  return (float)rand() / (float)RAND_MAX;
+ECS_CTOR(Firework, ptr, {
+  *ptr = (Firework){ 0 };
+})
+
+ECS_DTOR(Firework, ptr, {
+  if (ptr->phases) {
+    for (unsigned j = 0; j < ptr->phases_count; j++) {
+      free(ptr->phases[j].colors);
+    }
+  }
+  free(ptr->phases);
+})
+
+ECS_CTOR(FireworkParticle, ptr, {
+  *ptr = (FireworkParticle){ 0 };
+})
+
+ECS_CTOR(ShouldFadeAway, ptr, {
+  *ptr = 1;
+})
+
+static float random_float(const float min, const float max) {
+  return (float)rand() / (float)RAND_MAX * (max - min) + min;
+}
+
+static int random_int(const int min, const int max) {
+  return rand() % (max - min) + min;
 }
 
 static void Age(ecs_iter_t* it) {
@@ -95,25 +142,159 @@ static void Orbit(ecs_iter_t* it) {
 
 static ecs_entity_t particle_shader_program, particle_mesh;
 
-static void SpawnParticle(ecs_iter_t* it) {
-  Velocity3D velocity = { random(), random(), random() };
-  vkm_mul(&velocity, 30.0f, &velocity);
-  vkm_sub(&velocity, 15.0f, &velocity);
+static void spawn_firework_particles(
+  ecs_world_t* world,
+  const ecs_entity_t parent,
+  const Position3D* position,
+  const firework_phase_t* phase,
+  const uint16_t phase_index,
+  const bool last_phase
+) {
+  const int count = random_int(phase->min_particles, phase->max_particles + 1);
+  for (int i = 0; i < count; i++) {
+    Position3D position_copy = *position;
+    ecs_entity(world, {
+      .parent = parent,
+      .add = ecs_ids(
+        ecs_id(Force3D),
+        ecs_pair(ecs_id(Uses), particle_shader_program),
+        ecs_pair(ecs_id(Uses), particle_mesh)
+      ),
+      .set = ecs_values(
+        { .type = ecs_id(FireworkParticle), .ptr = &(FireworkParticle){ .phase = phase_index } },
+        { .type = ecs_id(Position3D), .ptr = &position_copy },
+        { .type = ecs_id(Velocity3D), .ptr = &(Velocity3D){ {
+          random_float(phase->min_velocity.x, phase->max_velocity.x),
+          random_float(phase->min_velocity.y, phase->max_velocity.y),
+          random_float(phase->min_velocity.z, phase->max_velocity.z),
+        } } },
+        { .type = ecs_id(Mass), .ptr = &(Mass){ 0.01f } },
+        { .type = ecs_id(Color), .ptr = phase->colors + rand() % phase->colors_count },
+        { .type = ecs_id(Lifespan), .ptr = &(Lifespan){ random_float(phase->min_lifespan, phase->max_lifespan) } },
+        { .type = ecs_id(Size), .ptr = &(Size){ random_float(phase->min_size, phase->max_size) } },
+        { .type = ecs_id(ShouldFadeAway), .ptr = &(ShouldFadeAway){ last_phase } }
+      ),
+    });
+  }
+}
+
+static void OnAddFirework(ecs_iter_t* it) {
+  const Firework* fireworks = ecs_field(it, Firework, 0);
+  const Position3D* positions = ecs_field(it, Position3D, 1);
+
+  for (int i = 0; i < it->count; i++) {
+    const Firework* firework = fireworks + i;
+    if (!firework->phases) {
+      continue;
+    }
+
+    spawn_firework_particles(
+      it->world,
+      it->entities[i],
+      positions + i,
+      firework->phases,
+      0,
+      firework->phases_count == 1
+    );
+  }
+}
+
+static void OnRemoveFireworkParticle(ecs_iter_t* it) {
+  const FireworkParticle* firework_particles = ecs_field(it, FireworkParticle, 0);
+  const Position3D* positions = ecs_field(it, Position3D, 1);
+  const Firework* firework = ecs_field(it, Firework, 2);
+
+  for (int i = 0; i < it->count; i++) {
+    const FireworkParticle* firework_particle = firework_particles + i;
+
+    assert(firework_particle->phase < firework->phases_count);
+    if (firework_particle->phase < firework->phases_count - 1) {
+      const uint16_t new_phase_index = firework_particle->phase + 1;
+      spawn_firework_particles(
+        it->world,
+        it->sources[2],
+        positions + i,
+        firework->phases + new_phase_index,
+        new_phase_index,
+        new_phase_index == firework->phases_count - 1
+      );
+    }
+  }
+}
+
+static void SpawnFirework(ecs_iter_t* it) {
+  Firework firework = {
+    .phases = malloc(3 * sizeof(firework.phases[0])),
+    .phases_count = 3,
+  };
+
+  firework.phases[0] = (firework_phase_t){
+    .colors = malloc(sizeof(firework.phases->colors[0])),
+    .min_velocity = (vkm_vec3){ { -1.0f, 15.0f, -1.0f } },
+    .max_velocity = (vkm_vec3){ {  1.0f, 25.0f,  1.0f } },
+    .min_lifespan = 0.6f,
+    .max_lifespan = 1.2f,
+    .min_size = 0.25f,
+    .max_size = 0.5f,
+    .colors_count = 1,
+    .min_particles = 1,
+    .max_particles = 1,
+  };
+  firework.phases[0].colors[0] = (Color){ { 1.0f, 0.0f, 0.0f, 1.0f } };
+
+  firework.phases[1] = (firework_phase_t){
+    .colors = malloc(3 * sizeof(firework.phases->colors[0])),
+    .min_velocity = (vkm_vec3){ { -10.0f,   1.0f, -10.0f } },
+    .max_velocity = (vkm_vec3){ {  10.0f,  10.0f,  10.0f } },
+    .min_lifespan = 0.5f,
+    .max_lifespan = 1.0f,
+    .min_size = 0.15f,
+    .max_size = 0.30f,
+    .colors_count = 2,
+    .min_particles = 5,
+    .max_particles = 10,
+  };
+  firework.phases[1].colors[0] = (Color){ { 0.0f, 1.0f, 0.0f, 1.0f } };
+  firework.phases[1].colors[1] = (Color){ { 0.0f, 1.0f, 1.0f, 1.0f } };
+  firework.phases[1].colors[2] = (Color){ { 1.0f, 1.0f, 0.0f, 1.0f } };
+
+  firework.phases[2] = (firework_phase_t){
+    .colors = malloc(5 * sizeof(firework.phases->colors[0])),
+    .min_velocity = (vkm_vec3){ { -5.0f, -2.0f, -5.0f } },
+    .max_velocity = (vkm_vec3){ {  5.0f,  5.0f,  5.0f } },
+    .min_lifespan = 0.5f,
+    .max_lifespan = 1.0f,
+    .min_size = 0.1f,
+    .max_size = 0.2f,
+    .colors_count = 5,
+    .min_particles = 15,
+    .max_particles = 20,
+  };
+  firework.phases[2].colors[0] = (Color){ { 1.0f, 0.0f, 0.0f, 1.0f } };
+  firework.phases[2].colors[1] = (Color){ { 0.0f, 1.0f, 0.0f, 1.0f } };
+  firework.phases[2].colors[2] = (Color){ { 0.0f, 0.0f, 1.0f, 1.0f } };
+  firework.phases[2].colors[3] = (Color){ { 1.0f, 0.0f, 1.0f, 1.0f } };
+  firework.phases[2].colors[4] = (Color){ { 1.0f, 1.0f, 1.0f, 1.0f } };
+
+  float lifespan_sum = 0.0f;
+  for (unsigned i = 0; i < firework.phases_count; i++) {
+    lifespan_sum += firework.phases[i].max_lifespan;
+  }
+
+  static int count = 0;
+  char buffer[22];
+  sprintf(buffer, "Firework #%d", ++count);
 
   ecs_entity(it->world, {
-    .add = ecs_ids(
-      ecs_id(Position3D),
-      ecs_id(Force3D),
-      ecs_pair(ecs_id(Uses), particle_shader_program),
-      ecs_pair(ecs_id(Uses), particle_mesh),
-      ecs_id(Lifetime)
-    ),
+    .name = buffer,
     .set = ecs_values(
-      { .type = ecs_id(Velocity3D), .ptr = &velocity },
-      { .type = ecs_id(Mass), .ptr = &(Mass){ 0.01f }},
-      { .type = ecs_id(Color), .ptr = &(Color){ { random(), random(), random(), 1.0f } }},
-      { .type = ecs_id(Lifespan), .ptr = &(Lifespan){ random() * 5.0f }},
-      { .type = ecs_id(Size), .ptr = &(Size){ 1.0f } }
+      { .type = ecs_id(Firework), .ptr = &firework },
+      { .type = ecs_id(Position3D), .ptr = &(Position3D){ {
+        random_float(-5.0f, 5.0f),
+        -5.0f,
+        random_float(-5.0f, 5.0f),
+      } } },
+      { .type = ecs_id(Lifespan), .ptr = &lifespan_sum }
     ),
   });
 }
@@ -140,6 +321,8 @@ int main(const int argc, char** argv) {
   ecs_primitive(world, { .entity = ecs_id(Lifespan), .kind = EcsF32 });
   ecs_add_pair(world, ecs_id(Lifespan), EcsIsA, EcsSeconds);
   ecs_set_hooks(world, Lifespan, { .ctor = ecs_ctor(Lifespan) });
+
+  ecs_add_pair(world, ecs_id(Lifespan), EcsWith, ecs_id(Lifetime));
 
   ECS_COMPONENT_DEFINE(world, Size);
   ecs_primitive(world, { .entity = ecs_id(Size), .kind = EcsF32 });
@@ -168,6 +351,26 @@ int main(const int argc, char** argv) {
 
   ECS_TAG_DEFINE(world, LookingAt);
 
+  ECS_COMPONENT_DEFINE(world, Firework);
+  ecs_set_hooks(world, Firework, {
+    .ctor = ecs_ctor(Firework),
+    .dtor = ecs_dtor(Firework),
+  });
+  ECS_OBSERVER(world, OnAddFirework, EcsOnAdd, [in] Firework, [in] cvkm.Position3D);
+
+  ECS_COMPONENT_DEFINE(world, FireworkParticle);
+  ecs_set_hooks(world, FireworkParticle, {
+    .ctor = ecs_ctor(FireworkParticle),
+  });
+  ECS_OBSERVER(world, OnRemoveFireworkParticle, EcsOnRemove,
+    [in] FireworkParticle,
+    [in] cvkm.Position3D,
+    [in] Firework(up),
+  );
+
+  ECS_COMPONENT_DEFINE(world, ShouldFadeAway);
+  ecs_primitive(world, { .entity = ecs_id(ShouldFadeAway), .kind = EcsI32 });
+
   ECS_SYSTEM(world, Age, EcsOnUpdate, [inout] Lifetime, [in] ?Lifespan);
   ECS_SYSTEM(world, Orbit, EcsOnUpdate,
     [out] cvkm.Position3D,
@@ -177,8 +380,8 @@ int main(const int argc, char** argv) {
     [in] ?cvkm.Position3D($target),
   );
 
-  ECS_SYSTEM(world, SpawnParticle, EcsOnUpdate, 0);
-  ecs_set_interval(world, ecs_id(SpawnParticle), 1.0f / 20.0f);
+  ECS_SYSTEM(world, SpawnFirework, EcsOnUpdate, 0);
+  ecs_set_interval(world, ecs_id(SpawnFirework), 1.5f);
 
   static const float floor_vertices[] = {
     // Position
@@ -222,6 +425,7 @@ int main(const int argc, char** argv) {
     "uniform float entitySize;\n"
     "uniform float entityLifetime;\n"
     "uniform float entityLifespan;\n"
+    "uniform int entityShouldFadeAway;\n"
     "\n"
     "void main() {\n"
     "  vec4 view_position = view * model * vec4(0.0, 0.0, 0.0, 1.0);\n"
@@ -230,7 +434,10 @@ int main(const int argc, char** argv) {
     "\n"
     "  float focal_length_normalized = projection[1][1];\n"
     "  float focal_length_pixels = (resolution.y * 0.5) * focal_length_normalized;\n"
-    "  gl_PointSize = (entitySize * (entityLifespan - entityLifetime) / entityLifespan) * focal_length_pixels / distance_to_camera;\n"
+    "  float size = entitySize * (entityShouldFadeAway != 0\n"
+    "    ? (entityLifespan - entityLifetime) / entityLifespan\n"
+    "    : entitySize);\n"
+    "  gl_PointSize = size * focal_length_pixels / distance_to_camera;\n"
     "\n"
     "  gl_Position = projection * view_position;\n"
     "}\n";
