@@ -2,6 +2,7 @@
 #define _CRT_NONSTDC_NO_DEPRECATE
 #endif
 #include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 #define CVKM_NO
@@ -20,11 +21,29 @@ typedef struct Orbiter {
   float height, distance, speed;
 } Orbiter;
 
+typedef struct firework_phase_t {
+  Color* colors;
+  vkm_vec3 min_velocity, max_velocity;
+  float min_lifespan, max_lifespan, min_size, max_size;
+  uint16_t colors_count, min_particles, max_particles;
+} firework_phase_t;
+
+typedef struct Firework {
+  firework_phase_t* phases;
+  uint32_t phases_count;
+} Firework;
+
+typedef struct FireworkParticle {
+  uint16_t phase;
+} FireworkParticle;
+
 static ECS_COMPONENT_DECLARE(Lifetime);
 static ECS_COMPONENT_DECLARE(Lifespan);
 static ECS_COMPONENT_DECLARE(Size);
 static ECS_COMPONENT_DECLARE(Orbiter);
 static ECS_TAG_DECLARE(LookingAt);
+static ECS_COMPONENT_DECLARE(Firework);
+static ECS_COMPONENT_DECLARE(FireworkParticle);
 
 ECS_CTOR(Lifetime, ptr, {
   *ptr = 0.0f;
@@ -41,13 +60,45 @@ ECS_CTOR(Size, ptr, {
 ECS_CTOR(Orbiter, ptr, {
   *ptr = (Orbiter){
     .height = 3.0f,
-    .distance = 15.0f,
+    .distance = 20.0f,
     .speed = 0.25f,
   };
 })
 
-static float random() {
-  return (float)rand() / (float)RAND_MAX;
+ECS_CTOR(Firework, ptr, {
+  *ptr = (Firework){ 0 };
+})
+
+ECS_COPY(Firework, dst, src, {
+  dst->phases = malloc(src->phases_count * sizeof(dst->phases[0]));
+  dst->phases_count = src->phases_count;
+})
+
+ECS_MOVE(Firework, dst, src, {
+  *dst = *src;
+  *src = (Firework){ 0 };
+})
+
+ECS_DTOR(Firework, ptr, {
+  if (ptr->phases) {
+    for (unsigned j = 0; j < ptr->phases_count; j++) {
+      free(ptr->phases[j].colors);
+    }
+  }
+  free(ptr->phases);
+  *ptr = (Firework){ 0 };
+})
+
+ECS_CTOR(FireworkParticle, ptr, {
+  *ptr = (FireworkParticle){ 0 };
+})
+
+static float random(const float min, const float max) {
+  return ((float)rand() / (float)RAND_MAX) * (max - min) + min;
+}
+
+static int random_int(const int min, const int max) {
+  return (rand() % (max - min)) + min;
 }
 
 static void Age(ecs_iter_t* it) {
@@ -96,9 +147,7 @@ static void Orbit(ecs_iter_t* it) {
 static ecs_entity_t particle_shader_program, particle_mesh;
 
 static void SpawnParticle(ecs_iter_t* it) {
-  Velocity3D velocity = { random(), random(), random() };
-  vkm_mul(&velocity, 30.0f, &velocity);
-  vkm_sub(&velocity, 15.0f, &velocity);
+  Velocity3D velocity = { random(-15.0f, 15.0f), random(-15.0f, 15.0f), random(-15.0f, 15.0f) };
 
   ecs_entity(it->world, {
     .add = ecs_ids(
@@ -111,9 +160,146 @@ static void SpawnParticle(ecs_iter_t* it) {
     .set = ecs_values(
       { .type = ecs_id(Velocity3D), .ptr = &velocity },
       { .type = ecs_id(Mass), .ptr = &(Mass){ 0.01f }},
-      { .type = ecs_id(Color), .ptr = &(Color){ { random(), random(), random(), 1.0f } }},
-      { .type = ecs_id(Lifespan), .ptr = &(Lifespan){ random() * 5.0f }},
+      { .type = ecs_id(Color), .ptr = &(Color){ {
+        random(0.0f, 1.0f),
+        random(0.0f, 1.0f),
+        random(0.0f, 1.0f),
+        1.0f,
+      } }},
+      { .type = ecs_id(Lifespan), .ptr = &(Lifespan){ random(0.5f, 5.0f) }},
       { .type = ecs_id(Size), .ptr = &(Size){ 1.0f } }
+    ),
+  });
+}
+
+static void spawn_firework_particles(
+  ecs_world_t* world,
+  const ecs_entity_t parent,
+  const Position3D* position,
+  const firework_phase_t* phase,
+  const uint16_t phase_index
+) {
+  const int count = random_int(phase->min_particles, phase->max_particles + 1);
+  for (int i = 0; i < count; i++) {
+    Position3D position_copy = *position;
+    const ecs_entity_t particle = ecs_entity(world, {
+      .add = ecs_ids(
+        ecs_id(Force3D),
+        ecs_pair(ecs_id(Uses), particle_shader_program),
+        ecs_pair(ecs_id(Uses), particle_mesh),
+        ecs_id(Lifetime)
+      ),
+      .set = ecs_values(
+        { .type = ecs_id(FireworkParticle), .ptr = &(FireworkParticle){ .phase = phase_index } },
+        { .type = ecs_id(Position3D), .ptr = &position_copy },
+        { .type = ecs_id(Velocity3D), .ptr = &(Velocity3D){
+          random(phase->min_velocity.x, phase->max_velocity.x),
+          random(phase->min_velocity.y, phase->max_velocity.y),
+          random(phase->min_velocity.z, phase->max_velocity.z),
+        } },
+        { .type = ecs_id(Mass), .ptr = &(Mass){ 0.01f }},
+        { .type = ecs_id(Color), .ptr = phase->colors + (rand() % phase->colors_count) },
+        { .type = ecs_id(Lifespan), .ptr = &(Lifespan){ random(phase->min_lifespan, phase->max_lifespan) }},
+        { .type = ecs_id(Size), .ptr = &(Size){ random(phase->min_size, phase->max_size) }}
+      ),
+    });
+    ecs_add_pair(world, particle, EcsChildOf, parent);
+  }
+}
+
+static void OnSetFirework(ecs_iter_t* it) {
+  const Firework* fireworks = ecs_field(it, Firework, 0);
+  const Position3D* positions = ecs_field(it, Position3D, 1);
+
+  for (int i = 0; i < it->count; i++) {
+    const Firework* firework = fireworks + i;
+    if (!firework->phases) {
+      continue;
+    }
+
+    spawn_firework_particles(it->world, it->entities[i], positions + i, firework->phases, 0);
+  }
+}
+
+static void OnDeleteFireworkParticle(ecs_iter_t* it) {
+  const FireworkParticle* firework_particles = ecs_field(it, FireworkParticle, 0);
+  const Position3D* positions = ecs_field(it, Position3D, 1);
+  const Firework* firework = ecs_field(it, Firework, 2);
+
+  for (int i = 0; i < it->count; i++) {
+    const FireworkParticle* firework_particle = firework_particles + i;
+    const ecs_entity_t parent = it->sources[2];
+    
+    assert(firework_particle->phase < firework->phases_count);
+    if (firework_particle->phase < firework->phases_count - 1) {
+      spawn_firework_particles(it->world, parent, positions + i, firework->phases, firework_particle->phase + 1);
+    }
+
+    ecs_iter_t children = ecs_children(it->world, parent);
+    if (!ecs_children_next(&children)) {
+      // If the firework has no children left, delete it.
+      ecs_delete(it->world, parent);
+    }
+  }
+}
+
+static void SpawnFirework(ecs_iter_t* it) {
+  Firework firework = {
+    .phases = malloc(3 * sizeof(firework.phases[0])),
+    .phases_count = 3,
+  };
+
+  firework.phases[0] = (firework_phase_t){
+    .colors = malloc(sizeof(firework.phases->colors[0])),
+    .min_velocity = (vkm_vec3){ -1.0f, 10.0f, -1.0f },
+    .max_velocity = (vkm_vec3){  1.0f, 20.0f,  1.0f },
+    .min_lifespan = 1.0f,
+    .max_lifespan = 2.0f,
+    .min_size = 0.25f,
+    .max_size = 0.5f,
+    .colors_count = 1,
+    .min_particles = 1,
+    .max_particles = 1,
+  };
+  firework.phases[0].colors[0] = (Color){ 1.0f, 0.0f, 0.0f, 1.0f };
+
+  firework.phases[1] = (firework_phase_t){
+    .colors = malloc(2 * sizeof(firework.phases->colors[0])),
+    .min_velocity = (vkm_vec3){ -10.0f, -10.0f, -10.0f },
+    .max_velocity = (vkm_vec3){  10.0f,  10.0f,  10.0f },
+    .min_lifespan = 1.0f,
+    .max_lifespan = 2.0f,
+    .min_size = 0.15f,
+    .max_size = 0.30f,
+    .colors_count = 2,
+    .min_particles = 20,
+    .max_particles = 50,
+  };
+  firework.phases[1].colors[0] = (Color){ 0.0f, 0.0f, 1.0f, 1.0f };
+  firework.phases[1].colors[1] = (Color){ 1.0f, 0.0f, 1.0f, 1.0f };
+
+  firework.phases[2] = (firework_phase_t){
+    .colors = malloc(5 * sizeof(firework.phases->colors[0])),
+    .min_velocity = (vkm_vec3){ -5.0f, -5.0f, -5.0f },
+    .max_velocity = (vkm_vec3){  5.0f,  5.0f,  5.0f },
+    .min_lifespan = 1.0f,
+    .max_lifespan = 4.0f,
+    .min_size = 0.1f,
+    .max_size = 0.2f,
+    .colors_count = 5,
+    .min_particles = 40,
+    .max_particles = 100,
+  };
+  firework.phases[2].colors[0] = (Color){ 1.0f, 0.0f, 0.0f, 1.0f };
+  firework.phases[2].colors[1] = (Color){ 0.0f, 1.0f, 0.0f, 1.0f };
+  firework.phases[2].colors[2] = (Color){ 0.0f, 0.0f, 1.0f, 1.0f };
+  firework.phases[2].colors[3] = (Color){ 1.0f, 0.0f, 1.0f, 1.0f };
+  firework.phases[2].colors[4] = (Color){ 1.0f, 1.0f, 1.0f, 1.0f };
+
+  ecs_entity(it->world, {
+    .set = ecs_values(
+      { .type = ecs_id(Firework), .ptr = &firework },
+      { .type = ecs_id(Position3D), .ptr = &(Position3D){ -1.0f, -2.0f, -1.0f } }
     ),
   });
 }
@@ -168,6 +354,25 @@ int main(const int argc, char** argv) {
 
   ECS_TAG_DEFINE(world, LookingAt);
 
+  ECS_COMPONENT_DEFINE(world, Firework);
+  ecs_set_hooks(world, Firework, {
+    .ctor = ecs_ctor(Firework),
+    .copy = ecs_copy(Firework),
+    .move = ecs_move(Firework),
+    .dtor = ecs_dtor(Firework),
+  });
+  ECS_OBSERVER(world, OnSetFirework, EcsOnSet, [in] Firework, [in] cvkm.Position3D);
+
+  ECS_COMPONENT_DEFINE(world, FireworkParticle);
+  ecs_set_hooks(world, FireworkParticle, {
+    .ctor = ecs_ctor(FireworkParticle),
+  });
+  ECS_OBSERVER(world, OnDeleteFireworkParticle, EcsOnDelete,
+    [in] FireworkParticle,
+    [in] cvkm.Position3D,
+    [in] Firework(up)
+  );
+
   ECS_SYSTEM(world, Age, EcsOnUpdate, [inout] Lifetime, [in] ?Lifespan);
   ECS_SYSTEM(world, Orbit, EcsOnUpdate,
     [out] cvkm.Position3D,
@@ -179,6 +384,9 @@ int main(const int argc, char** argv) {
 
   ECS_SYSTEM(world, SpawnParticle, EcsOnUpdate, 0);
   ecs_set_interval(world, ecs_id(SpawnParticle), 1.0f / 20.0f);
+
+  ECS_SYSTEM(world, SpawnFirework, EcsOnUpdate, 0);
+  ecs_set_interval(world, ecs_id(SpawnFirework), 3.0f);
 
   static const float floor_vertices[] = {
     // Position
