@@ -33,7 +33,9 @@ if(MSVC)
 else()
   target_compile_options(tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
   set_source_files_properties(${DISABLE_WARNINGS_LIST} PROPERTIES COMPILE_FLAGS -w)
-  target_compile_definitions(tests PRIVATE MUNIT_NO_FORK)
+  if(EMSCRIPTEN)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sALLOW_MEMORY_GROWTH=1 --closure 1 -sSTACK_SIZE=1mb")
+  endif()
 endif()
 
 if(UNIX AND NOT ANDROID)
@@ -43,3 +45,7 @@ elseif(WIN32)
 endif()
 
 target_include_directories(tests PRIVATE include libs/cvkm libs/flecs libs/glitch)
+
+if(EMSCRIPTEN)
+  configure_file(src/index.html ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+endif()

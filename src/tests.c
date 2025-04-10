@@ -1,4 +1,5 @@
 #ifdef WIN32
+#define _CRT_SECURE_NO_WARNINGS
 #define _CRT_NONSTDC_NO_DEPRECATE
 #endif
 #include <stddef.h>
@@ -12,6 +13,8 @@
 #include <flecs.h>
 #include <funomenal.h>
 #include <glitch.h>
+
+#define TARGET_FPS 60
 
 typedef float Lifetime;
 typedef float Lifespan;
@@ -299,6 +302,22 @@ static void SpawnFirework(ecs_iter_t* it) {
   });
 }
 
+#ifdef GLI_EMSCRIPTEN
+static bool emscripten_main_loop(const double time, void* world) {
+  static double last_time = 0.0;
+  const double delta_time = last_time <= 0.0 ? 1.0 / TARGET_FPS : (time - last_time) / 1000.0;
+  last_time = time;
+
+  const bool quit = !ecs_progress(world, (ecs_ftime_t)delta_time);
+  if (quit) {
+    ecs_fini(world);
+    return false;
+  }
+
+  return true;
+}
+#endif
+
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
 #ifdef __clang__
@@ -512,8 +531,16 @@ int main(const int argc, char** argv) {
   ecs_add(world, ecs_id(Camera3D), Orbiter);
   ecs_set_pair_second(world, ecs_id(Camera3D), LookingAt, Position3D, CVKM_VEC3_ZERO_INIT);
 
+  ecs_set_id(world, ecs_id(Window), ecs_id(Window), sizeof(GLitchWindow), &(GLitchWindow){
+    .name = "Funomenal tests",
+    .size = { { 800, 600 } },
+  });
+
   ecs_randomize_timers(world);
 
+#ifdef GLI_EMSCRIPTEN
+  emscripten_request_animation_frame_loop(emscripten_main_loop, world);
+#else
   ecs_app_run(world, &(ecs_app_desc_t){
     .target_fps = 60,
     .frames = 0,
@@ -522,6 +549,7 @@ int main(const int argc, char** argv) {
   });
 
   ecs_fini(world);
+#endif
 }
 
 #ifndef _MSC_VER

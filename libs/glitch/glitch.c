@@ -8,6 +8,7 @@
 #endif
 
 #include <assert.h>
+#include <stdalign.h>
 #include <stdbool.h>
 #include <stdlib.h>
 
@@ -16,45 +17,6 @@
 #include <cvkm.h>
 #include <flecs.h>
 #include <glitch.h>
-
-#ifdef GLI_LINUX
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <GL/gl.h>
-#include <GL/glx.h>
-
-typedef GLXContext (*glXCreateContextAttribsARBProc)(
-  Display* display,
-  GLXFBConfig config,
-  GLXContext share_context,
-  Bool direct,
-  const int* attrib_list
-);
-
-static GLXContext context;
-static Display* display;
-static Window window;
-static Atom wm_delete;
-#elif defined(GLI_WINDOWS)
-typedef HGLRC(WINAPI* PFNWGLCREATECONTEXTATTRIBSARBPROC)(
-  HDC device_context_handle,
-  HGLRC gl_rendering_context_handle,
-  const int* attribute_list
-);
-
-static HGLRC context;
-static HWND window_handle;
-static HDC device_context_handle;
-#else
-#error Unsupported platform.
-#endif
-
-#define GLI_INITIAL_WIDTH 800
-#define GLI_INITIAL_HEIGHT 600
-
-// TODO: Move this into an ECS component.
-static int width = GLI_INITIAL_WIDTH;
-static int height = GLI_INITIAL_HEIGHT;
 
 static GLuint attributeless_vertex_array;
 
@@ -86,6 +48,7 @@ static const char* built_in_names[] = {
 static GLuint built_ins_uniform_buffer;
 #pragma endregion
 
+#if defined(GLI_LINUX) || defined (GLI_WINDOWS)
 typedef GLuint (*glCreateShaderProc)(GLenum shaderType);
 static glCreateShaderProc glCreateShader;
 typedef void (*glDeleteShaderProc)(GLuint shader);
@@ -136,13 +99,13 @@ typedef GLint (*glGetUniformLocationProc)(GLuint program, const GLchar* name);
 static glGetUniformLocationProc glGetUniformLocation;
 typedef void (*glGenVertexArraysProc)(GLsizei n, GLuint* arrays);
 static glGenVertexArraysProc glGenVertexArrays;
-typedef void (*glDeleteVertexArraysProc)(GLsizei n, const GLuint *arrays);
+typedef void (*glDeleteVertexArraysProc)(GLsizei n, const GLuint* arrays);
 static glDeleteVertexArraysProc glDeleteVertexArrays;
 typedef void (*glBindVertexArrayProc)(GLuint array);
 static glBindVertexArrayProc glBindVertexArray;
 typedef void (*glGenBuffersProc)(GLsizei n, GLuint* buffers);
 static glGenBuffersProc glGenBuffers;
-typedef void (*glDeleteBuffersProc)(GLsizei n, const GLuint *buffers);
+typedef void (*glDeleteBuffersProc)(GLsizei n, const GLuint* buffers);
 static glDeleteBuffersProc glDeleteBuffers;
 typedef void (*glBindBufferProc)(GLenum target, GLuint buffer);
 static glBindBufferProc glBindBuffer;
@@ -161,37 +124,39 @@ typedef void (*glVertexAttribIPointerProc)(GLuint index, GLint size, GLenum type
 static glVertexAttribIPointerProc glVertexAttribIPointer;
 typedef void (*glEnableVertexAttribArrayProc)(GLuint index);
 static glEnableVertexAttribArrayProc glEnableVertexAttribArray;
-typedef void (*glBufferDataProc)(GLenum target, GLsizeiptr size, const void *data, GLenum usage);
+typedef void (*glBufferDataProc)(GLenum target, GLsizeiptr size, const void* data, GLenum usage);
 static glBufferDataProc glBufferData;
 typedef void (*glUseProgramProc)(GLuint program);
 static glUseProgramProc glUseProgram;
-typedef void (*glUniform1fvProc)(GLint location, GLsizei count, const GLfloat *value);
+typedef void (*glUniform1fvProc)(GLint location, GLsizei count, const GLfloat* value);
 static glUniform1fvProc glUniform1fv;
-typedef void (*glUniform2fvProc)(GLint location, GLsizei count, const GLfloat *value);
+typedef void (*glUniform2fvProc)(GLint location, GLsizei count, const GLfloat* value);
 static glUniform2fvProc glUniform2fv;
-typedef void (*glUniform3fvProc)(GLint location, GLsizei count, const GLfloat *value);
+typedef void (*glUniform3fvProc)(GLint location, GLsizei count, const GLfloat* value);
 static glUniform3fvProc glUniform3fv;
-typedef void (*glUniform4fvProc)(GLint location, GLsizei count, const GLfloat *value);
+typedef void (*glUniform4fvProc)(GLint location, GLsizei count, const GLfloat* value);
 static glUniform4fvProc glUniform4fv;
-typedef void (*glUniform1ivProc)(GLint location, GLsizei count, const GLint *value);
+typedef void (*glUniform1ivProc)(GLint location, GLsizei count, const GLint* value);
 static glUniform1ivProc glUniform1iv;
-typedef void (*glUniform2ivProc)(GLint location, GLsizei count, const GLint *value);
+typedef void (*glUniform2ivProc)(GLint location, GLsizei count, const GLint* value);
 static glUniform2ivProc glUniform2iv;
-typedef void (*glUniform3ivProc)(GLint location, GLsizei count, const GLint *value);
+typedef void (*glUniform3ivProc)(GLint location, GLsizei count, const GLint* value);
 static glUniform3ivProc glUniform3iv;
-typedef void (*glUniform4ivProc)(GLint location, GLsizei count, const GLint *value);
+typedef void (*glUniform4ivProc)(GLint location, GLsizei count, const GLint* value);
 static glUniform4ivProc glUniform4iv;
-typedef void (*glUniform1uivProc)(GLint location, GLsizei count, const GLuint *value);
+typedef void (*glUniform1uivProc)(GLint location, GLsizei count, const GLuint* value);
 static glUniform1uivProc glUniform1uiv;
-typedef void (*glUniform2uivProc)(GLint location, GLsizei count, const GLuint *value);
+typedef void (*glUniform2uivProc)(GLint location, GLsizei count, const GLuint* value);
 static glUniform2uivProc glUniform2uiv;
-typedef void (*glUniform3uivProc)(GLint location, GLsizei count, const GLuint *value);
+typedef void (*glUniform3uivProc)(GLint location, GLsizei count, const GLuint* value);
 static glUniform3uivProc glUniform3uiv;
-typedef void (*glUniform4uivProc)(GLint location, GLsizei count, const GLuint *value);
+typedef void (*glUniform4uivProc)(GLint location, GLsizei count, const GLuint* value);
 static glUniform4uivProc glUniform4uiv;
-typedef void (*glUniformMatrix4fvProc)(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+typedef void (*glUniformMatrix4fvProc)(GLint location, GLsizei count, GLboolean transpose, const GLfloat* value);
 static glUniformMatrix4fvProc glUniformMatrix4fv;
+#endif
 
+ECS_COMPONENT_DECLARE(Window);
 ECS_COMPONENT_DECLARE(MeshData);
 ECS_COMPONENT_DECLARE(Mesh);
 ECS_COMPONENT_DECLARE(ShaderProgramSource);
@@ -202,6 +167,28 @@ ECS_COMPONENT_DECLARE(Color);
 ECS_COMPONENT_DECLARE(ClearColor);
 
 ECS_TAG_DECLARE(Uses);
+
+ECS_CTOR(GLitchWindow, ptr, {
+  *ptr = (GLitchWindow){ 0 };
+})
+
+ECS_COPY(GLitchWindow, dst, src, {
+  *dst = *src;
+  if (src->name) {
+    dst->name = strdup(src->name);
+  }
+})
+
+ECS_MOVE(GLitchWindow, dst, src, {
+  free(dst->name);
+  *dst = *src;
+  *src = (GLitchWindow){ 0 };
+})
+
+ECS_DTOR(GLitchWindow, ptr, {
+  free(ptr->name);
+  *ptr = (GLitchWindow){ 0 };
+})
 
 ECS_CTOR(MeshData, ptr, {
   *ptr = (MeshData){ 0 };
@@ -307,7 +294,12 @@ ECS_CTOR(ClearColor, ptr, {
 static GLuint compile_shader(const GLenum type, const char* source) {
   const GLuint shader = glCreateShader(type);
   static const char* shader_copypasta =
+#ifdef GLI_EMSCRIPTEN
+    "#version 300 es\n"
+    "precision highp float;\n"
+#else
     "#version 330 core\n"
+#endif
     "layout(std140) uniform built_ins {\n"
     "  mat4 model, view, projection;\n"
     "  vec2 resolution;\n"
@@ -416,7 +408,7 @@ static void MakeMeshes(ecs_iter_t* it) {
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->index_buffer);
         glBufferData(
           GL_ELEMENT_ARRAY_BUFFER,
-          sizeof(*mesh_data->indices) * mesh_data->indices_count,
+          (int)sizeof(*mesh_data->indices) * mesh_data->indices_count,
           mesh_data->indices,
           GL_STATIC_DRAW
         );
@@ -485,7 +477,7 @@ static void CompileShaders(ecs_iter_t* it) {
 
       uniform->name = strdup(name_buffer);
       uniform->location = glGetUniformLocation(shader_program.program, name_buffer);
-      next:;
+    next:;
     }
 
     // Assuming we always insert all the built-in uniforms into the shader code.
@@ -593,7 +585,7 @@ static void CompileShaders(ecs_iter_t* it) {
 
       const ecs_entity_t component = ecs_lookup_symbol(it->world, component_name, false, false);
       if (!component) {
-        printf("Component %s not found.\n", component_name);
+        fprintf(stderr, "Component %s not found.\n", component_name);
         goto invalid_component;
       }
 
@@ -601,20 +593,20 @@ static void CompileShaders(ecs_iter_t* it) {
       const EcsPrimitive* primitive = ecs_get(it->world, component, EcsPrimitive);
       if (primitive) {
         switch (uniform->type) {
-        case GL_FLOAT:
-          type_matches = primitive->kind == EcsF32;
-          *ecs_uniform_type = GLI_FLOAT;
-          break;
-        case GL_INT:
-          type_matches = primitive->kind == EcsI32;
-          *ecs_uniform_type = GLI_INT;
-          break;
-        case GL_UNSIGNED_INT:
-          type_matches = primitive->kind == EcsU32;
-          *ecs_uniform_type = GLI_UINT;
-          break;
-        default:
-          break;
+          case GL_FLOAT:
+            type_matches = primitive->kind == EcsF32;
+            *ecs_uniform_type = GLI_FLOAT;
+            break;
+          case GL_INT:
+            type_matches = primitive->kind == EcsI32;
+            *ecs_uniform_type = GLI_INT;
+            break;
+          case GL_UNSIGNED_INT:
+            type_matches = primitive->kind == EcsU32;
+            *ecs_uniform_type = GLI_UINT;
+            break;
+          default:
+            break;
         }
       }
 
@@ -697,12 +689,16 @@ static void CompileShaders(ecs_iter_t* it) {
       assert(shader_program.uniforms_count >= 0);
 
       if (shader_program.uniforms_count > 0) {
+        free(shader_program.uniforms[j - skipped_uniforms].name);
         memmove(
           shader_program.uniforms + j - skipped_uniforms,
           shader_program.uniforms + j - skipped_uniforms + 1,
           (shader_program.uniforms_count - j + skipped_uniforms) * sizeof(gli_shader_input_data)
         );
-        shader_program.uniforms = realloc(shader_program.uniforms, shader_program.uniforms_count * sizeof(gli_shader_input_data));
+        shader_program.uniforms = realloc(
+          shader_program.uniforms,
+          shader_program.uniforms_count * sizeof(gli_shader_input_data)
+        );
       } else {
         free(shader_program.uniforms);
         shader_program.uniforms = NULL;
@@ -715,7 +711,7 @@ static void CompileShaders(ecs_iter_t* it) {
 
     ecs_set_id(it->world, it->entities[i], ecs_id(ShaderProgram), sizeof(ShaderProgram), &shader_program);
 
-    cleanup:
+  cleanup:
     glDeleteShader(vertex_shader);
     glDeleteShader(fragment_shader);
   }
@@ -728,12 +724,13 @@ static void PreRenderFrame(ecs_iter_t* it) {
   Camera3D* camera_3d = ecs_field(it, Camera3D, 3);
   const Position3D* camera_3d_position = ecs_field(it, Position3D, 4);
   const Rotation3D* camera_3d_rotation = ecs_field(it, Rotation3D, 5);
+  GLitchWindow* window = ecs_field(it, GLitchWindow, 6);
 
   if (camera_2d) {
     // Compute 2D projection matrix.
     const float zoom_factor = 1.0f / camera_2d->zoom;
-    const float half_width = (float)width * 0.5f * zoom_factor;
-    const float half_height = (float)height * 0.5f * zoom_factor;
+    const float half_width = (float)window->size.x * 0.5f * zoom_factor;
+    const float half_height = (float)window->size.y * 0.5f * zoom_factor;
     vkm_orthogonal(
       -half_width,
       half_width,
@@ -753,11 +750,15 @@ static void PreRenderFrame(ecs_iter_t* it) {
     }
   }
 
+  // This variable is declared here instead of an inner scope to work around a gcc optimizer bug (only happens with -O2
+  // and up) that makes it COMPLETELY IGNORE the call to vkm_quat_conjugate()...
+  // For the record, the bugged compiler I tested is gcc (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0
+  vkm_quat conjugate;
   if (camera_3d) {
     // Compute 3D projection matrix.
     vkm_perspective(
       camera_3d->field_of_view * CVKM_DEG_2_RAD_F,
-      (float)width / (float)height,
+      (float)window->size.x / (float)window->size.y,
       camera_3d->near_plane,
       camera_3d->far_plane,
       &camera_3d->projection
@@ -766,7 +767,6 @@ static void PreRenderFrame(ecs_iter_t* it) {
     // Compute 3D view matrix.
     camera_3d->view = CVKM_MAT4_IDENTITY;
     if (camera_3d_rotation) {
-      vkm_quat conjugate;
       vkm_quat_conjugate(camera_3d_rotation, &conjugate);
       vkm_mat4 rotation;
       vkm_quat_to_mat4(&conjugate, &rotation);
@@ -781,15 +781,15 @@ static void PreRenderFrame(ecs_iter_t* it) {
   }
 
 #ifdef GLI_LINUX
-  while (XPending(display)) {
+  while (XPending(window->display)) {
     XEvent event;
-    XNextEvent(display, &event);
+    XNextEvent(window->display, &event);
     switch (event.type) {
       case ConfigureNotify:
-        glViewport(0, 0, width = event.xconfigure.width, height = event.xconfigure.height);
+        glViewport(0, 0, window->size.x = event.xconfigure.width, window->size.y = event.xconfigure.height);
         break;
       case ClientMessage:
-        if ((Atom)event.xclient.data.l[0] == wm_delete) {
+        if ((Atom)event.xclient.data.l[0] == window->wm_delete) {
           ecs_quit(it->world);
         }
         break;
@@ -797,7 +797,7 @@ static void PreRenderFrame(ecs_iter_t* it) {
         break;
     }
   }
-#else
+#elif defined(GLI_WINDOWS)
   MSG message;
   while (PeekMessage(&message, NULL, 0, 0, PM_REMOVE)) {
     if (message.message == WM_QUIT) {
@@ -819,6 +819,7 @@ static void Render(ecs_iter_t* it) {
   const ShaderProgram* shader_programs = ecs_field(it, ShaderProgram, 0);
   const Camera2D* camera_2d = ecs_field(it, Camera2D, 1);
   const Camera3D* camera_3d = ecs_field(it, Camera3D, 2);
+  const GLitchWindow* window = ecs_field(it, GLitchWindow, 3);
 
   // No camera? No rendering.
   static bool warned = false;
@@ -833,7 +834,7 @@ static void Render(ecs_iter_t* it) {
   warned = false;
 
   built_ins_t built_ins = {
-    .resolution = { { (float)width, (float)height } },
+    .resolution = { { (float)window->size.x, (float)window->size.y } },
     .time = (float)ecs_get_world_info(it->world)->world_time_total,
     .delta_time = it->delta_time,
   };
@@ -988,11 +989,13 @@ static void Render(ecs_iter_t* it) {
 }
 
 static void PostRenderFrame(ecs_iter_t* it) {
-  (void)it;
+  const GLitchWindow* window = ecs_field(it, GLitchWindow, 0);
 #ifdef GLI_LINUX
-  glXSwapBuffers(display, window);
-#else
-  SwapBuffers(device_context_handle);
+  glXSwapBuffers(window->display, window->window);
+#elif defined(GLI_WINDOWS)
+  SwapBuffers(window->device_context_handle);
+#elif defined(GLI_EMSCRIPTEN)
+  (void)window;
 #endif
 
   GLenum error;
@@ -1003,10 +1006,11 @@ static void PostRenderFrame(ecs_iter_t* it) {
 
 #ifdef GLI_LINUX
 #define gli_get_proc_address(fun) glXGetProcAddressARB((const GLubyte*)#fun)
-#else
+#elif defined(GLI_WINDOWS)
 #define gli_get_proc_address(fun) wglGetProcAddress((LPCSTR)#fun)
 #endif
 
+#if defined(GLI_LINUX) || defined (GLI_WINDOWS)
 #define GLI_LOAD_PROC_ADDRESS(fun) do {\
   fun = (fun##Proc)gli_get_proc_address(fun);\
   if (!fun){\
@@ -1014,22 +1018,9 @@ static void PostRenderFrame(ecs_iter_t* it) {
     return;\
   }\
 } while (false)
-
-static void fini(ecs_world_t* world, void* unused) {
-  (void)world;
-  (void)unused;
-#ifdef GLI_LINUX
-  glXMakeCurrent(display, None, NULL);
-  glXDestroyContext(display, context);
-  XDestroyWindow(display, window);
-  XCloseDisplay(display);
-#else
-  wglMakeCurrent(NULL, NULL);
-  wglDeleteContext(context);
-  ReleaseDC(window_handle, device_context_handle);
-  DestroyWindow(window_handle);
+#elif defined(GLI_EMSCRIPTEN)
+#define GLI_LOAD_PROC_ADDRESS(fun) ((void)0)
 #endif
-}
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
@@ -1051,21 +1042,400 @@ static LRESULT CALLBACK window_proc(
       PostQuitMessage(0);
       return 0;
     case WM_SIZE:
-      glViewport(0, 0, width = LOWORD(long_param), height = HIWORD(long_param));
+      ecs_world_t* world = (ecs_world_t*)GetWindowLongPtr(handle, GWLP_USERDATA);
+      if (!world) {
+        return 0;
+      }
+
+      GLitchWindow* window = ecs_ensure_id(world, ecs_id(Window), ecs_id(Window));
+      glViewport(0, 0, window->size.x = LOWORD(long_param), window->size.y = HIWORD(long_param));
+      ecs_modified_id(world, ecs_id(Window), ecs_id(Window));
       return 0;
     default:
       return DefWindowProc(handle, message, word_param, long_param);
   }
 }
+#elif defined(GLI_EMSCRIPTEN)
+EM_JS(void, set_title, (const char* str), {
+  document.title = UTF8ToString(str);
+})
 #endif
+
+static void OnSetWindow(ecs_iter_t* it) {
+  GLitchWindow* window = ecs_field(it, GLitchWindow, 0);
+
+  static const char* default_window_name = "GLitch";
+
+  if (window->context) {
+#ifdef GLI_LINUX
+    XTextProperty text_property;
+    if (XStringListToTextProperty(&window->name, 1, &text_property) != 0) {
+      XSetWMName(window->display, window->window, &text_property);
+      XFree(text_property.value);
+    }
+
+    XWindowAttributes attributes;
+    XGetWindowAttributes(window->display, window->window, &attributes);
+    if (attributes.width != window->size.x || attributes.height != window->size.y) {
+      XResizeWindow(window->display, window->window, window->size.x, window->size.y);
+      XFlush(window->display);
+      glViewport(0, 0, window->size.x, window->size.y);
+    }
+#elif defined(GLI_WINDOWS)
+    SetWindowText(window->window_handle, window->name ? window->name : default_window_name);
+
+    RECT rect;
+    GetClientRect(window->window_handle, &rect);
+    if (((rect.right - rect.left) != window->size.x) || ((rect.bottom - rect.top) != window->size.y)) {
+      rect.right = rect.left + window->size.x;
+      rect.bottom = rect.top + window->size.y;
+      AdjustWindowRect(&rect, GetWindowLong(window->window_handle, GWL_STYLE), GetMenu(window->window_handle) != NULL);
+      SetWindowPos(
+        window->window_handle,
+        NULL,
+        0,
+        0,
+        window->size.x,
+        window->size.y,
+        SWP_NOMOVE
+          | SWP_NOZORDER
+          | SWP_NOREDRAW
+          | SWP_NOACTIVATE
+          | SWP_NOCOPYBITS
+          | SWP_NOOWNERZORDER
+          | SWP_NOSENDCHANGING
+      );
+      glViewport(0, 0, window->size.x, window->size.y);
+    }
+#endif
+  } else {
+#ifdef GLI_LINUX
+    window->display = XOpenDisplay(NULL);
+    if (!window->display) {
+      fprintf(stderr, "Cannot open display.\n");
+      return;
+    }
+
+    // Attributes for the framebuffer configuration
+    static int visual_attribs[] = {
+      GLX_X_RENDERABLE, True,
+      GLX_DRAWABLE_TYPE, GLX_WINDOW_BIT,
+      GLX_RENDER_TYPE, GLX_RGBA_BIT,
+      GLX_X_VISUAL_TYPE, GLX_TRUE_COLOR,
+      GLX_RED_SIZE, 8,
+      GLX_GREEN_SIZE, 8,
+      GLX_BLUE_SIZE, 8,
+      GLX_ALPHA_SIZE, 8,
+      GLX_DEPTH_SIZE, 24,
+      GLX_STENCIL_SIZE, 0,
+      GLX_DOUBLEBUFFER, True,
+      None
+    };
+
+    int framebuffer_count;
+    GLXFBConfig* framebuffer_config = glXChooseFBConfig(
+      window->display,
+      DefaultScreen(window->display),
+      visual_attribs,
+      &framebuffer_count
+    );
+    if (!framebuffer_config) {
+      fprintf(stderr, "Failed to retrieve a framebuffer configuration.\n");
+      return;
+    }
+    // Pick the first suitable framebuffer configuration.
+    GLXFBConfig best_config = framebuffer_config[0];
+    XFree(framebuffer_config);
+
+    // Get visual info from the framebuffer configuration.
+    XVisualInfo* visual_info = glXGetVisualFromFBConfig(window->display, best_config);
+    if (!visual_info) {
+      fprintf(stderr, "No appropriate visual found.\n");
+      return;
+    }
+
+    const Window root_window = RootWindow(window->display, visual_info->screen);
+
+    // Create a colormap and set window attributes.
+    XSetWindowAttributes set_window_attributes = {
+      .background_pixmap = None,
+      .event_mask = StructureNotifyMask | ExposureMask | KeyPressMask,
+      .colormap = XCreateColormap(window->display, root_window, visual_info->visual, AllocNone),
+    };
+
+    window->window = XCreateWindow(
+      window->display,
+      root_window,
+      0,
+      0,
+      window->size.x,
+      window->size.y,
+      0,
+      visual_info->depth,
+      InputOutput,
+      visual_info->visual,
+      CWBorderPixel | CWColormap | CWEventMask,
+      &set_window_attributes
+    );
+    XFree(visual_info);
+
+    if (!window->window) {
+      fprintf(stderr, "Failed to create window.\n");
+      return;
+    }
+
+    window->wm_delete = XInternAtom(window->display, "WM_DELETE_WINDOW", False);
+    XSetWMProtocols(window->display, window->window, &window->wm_delete, 1);
+
+    XStoreName(window->display, window->window, window->name ? window->name : default_window_name);
+    XMapWindow(window->display, window->window);
+
+    // Get the pointer to glXCreateContextAttribsARB for modern context creation
+    const glXCreateContextAttribsARBProc glXCreateContextAttribsARB =
+      (glXCreateContextAttribsARBProc)glXGetProcAddressARB((const GLubyte*)"glXCreateContextAttribsARB");
+
+    if (!glXCreateContextAttribsARB) {
+      fprintf(stderr, "Failed to get the address of glXCreateContextAttribsARB.\n");
+      return;
+    }
+
+    // Create a OpenGL context version 3.3
+    window->context = glXCreateContextAttribsARB(
+      window->display,
+      best_config,
+      0,
+      True,
+      (int[]){
+        GLX_CONTEXT_MAJOR_VERSION_ARB, 3,
+        GLX_CONTEXT_MINOR_VERSION_ARB, 3,
+        GLX_CONTEXT_PROFILE_MASK_ARB,
+        GLX_CONTEXT_CORE_PROFILE_BIT_ARB,
+        None,
+      }
+    );
+    if (!window->context) {
+      fprintf(stderr, "Failed to create OpenGL 3.3 context.\n");
+      return;
+    }
+
+    // Make the context current
+    glXMakeCurrent(window->display, window->window, window->context);
+#elif defined(GLI_WINDOWS)
+    static const char* class_name = "GLitchWindowClass";
+
+    if (!RegisterClass(
+      &(WNDCLASS){
+        .style = CS_OWNDC,
+        .lpfnWndProc = window_proc,
+        .hInstance = GetModuleHandle(NULL),
+        .hCursor = LoadCursor(NULL, IDC_ARROW),
+        .lpszClassName = class_name,
+      }
+    )) {
+      MessageBox(NULL, "Failed to register window class.", "Error", MB_OK);
+      return;
+    }
+
+    window->window_handle = CreateWindowEx(
+      0,
+      class_name,
+      window->name ? window->name : default_window_name,
+      WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+      CW_USEDEFAULT,
+      CW_USEDEFAULT,
+      window->size.x,
+      window->size.y,
+      NULL,
+      NULL,
+      GetModuleHandle(NULL),
+      NULL
+    );
+    if (!window->window_handle) {
+      MessageBox(NULL, "Failed to create window.", "Error", MB_OK);
+      return;
+    }
+    SetWindowLongPtr(window->window_handle, GWLP_USERDATA, (LONG_PTR)it->world);
+
+    window->device_context_handle = GetDC(window->window_handle);
+
+    // Set up the pixel format descriptor.
+    const PIXELFORMATDESCRIPTOR pixel_format_descriptor = {
+      .nSize = sizeof(PIXELFORMATDESCRIPTOR),
+      .nVersion = 1,
+      .dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
+      .iPixelType = PFD_TYPE_RGBA,
+      .cColorBits = 32,
+      .cDepthBits = 24,
+      .cStencilBits = 0,
+      .iLayerType = PFD_MAIN_PLANE,
+    };
+
+    const int pixel_format = ChoosePixelFormat(window->device_context_handle, &pixel_format_descriptor);
+    if (pixel_format == 0) {
+      MessageBox(NULL, "Failed to choose pixel format.", "Error", MB_OK);
+      return;
+    }
+
+    if (!SetPixelFormat(window->device_context_handle, pixel_format, &pixel_format_descriptor)) {
+      MessageBox(NULL, "Failed to set pixel format.", "Error", MB_OK);
+      return;
+    }
+
+    const HGLRC dummy_context_handle = wglCreateContext(window->device_context_handle);
+    if (!dummy_context_handle) {
+      MessageBox(NULL, "Failed to create dummy OpenGL context.", "Error", MB_OK);
+      return;
+    }
+
+    if (!wglMakeCurrent(window->device_context_handle, dummy_context_handle)) {
+      MessageBox(NULL, "Failed to activate dummy OpenGL context.", "Error", MB_OK);
+      return;
+    }
+
+    const PFNWGLCREATECONTEXTATTRIBSARBPROC wglCreateContextAttribsARB =
+      (PFNWGLCREATECONTEXTATTRIBSARBPROC)wglGetProcAddress("wglCreateContextAttribsARB");
+
+    if (!wglCreateContextAttribsARB) {
+      MessageBox(NULL, "Failed to get the address of wglCreateContextAttribsARB", "Error", MB_OK);
+      return;
+    }
+
+    window->context = wglCreateContextAttribsARB(
+      window->device_context_handle,
+      0,
+      (int[]){
+        WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
+        WGL_CONTEXT_MINOR_VERSION_ARB, 3,
+        WGL_CONTEXT_PROFILE_MASK_ARB,
+        WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
+        0,
+      }
+    );
+
+    if (!window->context) {
+      MessageBox(NULL, "Failed to create OpenGL 3.3 context.", "Error", MB_OK);
+      return;
+    }
+
+    wglMakeCurrent(window->device_context_handle, window->context);
+    wglDeleteContext(dummy_context_handle);
+#elif defined(GLI_EMSCRIPTEN)
+    window->context = emscripten_webgl_create_context("#canvas", &(EmscriptenWebGLContextAttributes){
+      .alpha = 0,
+      .depth = 1,
+      .stencil = 0,
+      .antialias = 1,
+      .premultipliedAlpha = 1,
+      .preserveDrawingBuffer = false,
+      .powerPreference = EM_WEBGL_POWER_PREFERENCE_DEFAULT,
+      .failIfMajorPerformanceCaveat = false,
+      .majorVersion = 2,
+      .minorVersion = 0,
+      .enableExtensionsByDefault = 1,
+      .explicitSwapControl = 0,
+      .proxyContextToMainThread = EMSCRIPTEN_WEBGL_CONTEXT_PROXY_DISALLOW,
+      .renderViaOffscreenBackBuffer = false,
+    });
+    emscripten_webgl_make_context_current(window->context);
+#endif
+
+#ifdef GLI_EMSCRIPTEN
+    set_title(window->name ? window->name : default_window_name);
+    emscripten_set_canvas_element_size("#canvas", window->size.x, window->size.y);
+    glViewport(0, 0, window->size.x, window->size.y);
+#endif
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+#ifndef GLI_EMSCRIPTEN
+    glEnable(GL_PROGRAM_POINT_SIZE);
+#endif
+
+    GLI_LOAD_PROC_ADDRESS(glCreateShader);
+    GLI_LOAD_PROC_ADDRESS(glDeleteShader);
+    GLI_LOAD_PROC_ADDRESS(glShaderSource);
+    GLI_LOAD_PROC_ADDRESS(glCompileShader);
+    GLI_LOAD_PROC_ADDRESS(glGetShaderiv);
+    GLI_LOAD_PROC_ADDRESS(glGetShaderInfoLog);
+    GLI_LOAD_PROC_ADDRESS(glCreateProgram);
+    GLI_LOAD_PROC_ADDRESS(glDeleteProgram);
+    GLI_LOAD_PROC_ADDRESS(glAttachShader);
+    GLI_LOAD_PROC_ADDRESS(glLinkProgram);
+    GLI_LOAD_PROC_ADDRESS(glGetProgramiv);
+    GLI_LOAD_PROC_ADDRESS(glGetProgramInfoLog);
+    GLI_LOAD_PROC_ADDRESS(glGetActiveAttrib);
+    GLI_LOAD_PROC_ADDRESS(glGetActiveUniform);
+    GLI_LOAD_PROC_ADDRESS(glGetAttribLocation);
+    GLI_LOAD_PROC_ADDRESS(glGetUniformLocation);
+    GLI_LOAD_PROC_ADDRESS(glGenVertexArrays);
+    GLI_LOAD_PROC_ADDRESS(glDeleteVertexArrays);
+    GLI_LOAD_PROC_ADDRESS(glBindVertexArray);
+    GLI_LOAD_PROC_ADDRESS(glGenBuffers);
+    GLI_LOAD_PROC_ADDRESS(glDeleteBuffers);
+    GLI_LOAD_PROC_ADDRESS(glBindBuffer);
+    GLI_LOAD_PROC_ADDRESS(glBindBufferRange);
+    GLI_LOAD_PROC_ADDRESS(glVertexAttribPointer);
+    GLI_LOAD_PROC_ADDRESS(glVertexAttribIPointer);
+    GLI_LOAD_PROC_ADDRESS(glEnableVertexAttribArray);
+    GLI_LOAD_PROC_ADDRESS(glBufferData);
+    GLI_LOAD_PROC_ADDRESS(glUseProgram);
+    GLI_LOAD_PROC_ADDRESS(glUniform1fv);
+    GLI_LOAD_PROC_ADDRESS(glUniform2fv);
+    GLI_LOAD_PROC_ADDRESS(glUniform3fv);
+    GLI_LOAD_PROC_ADDRESS(glUniform4fv);
+    GLI_LOAD_PROC_ADDRESS(glUniform1iv);
+    GLI_LOAD_PROC_ADDRESS(glUniform2iv);
+    GLI_LOAD_PROC_ADDRESS(glUniform3iv);
+    GLI_LOAD_PROC_ADDRESS(glUniform4iv);
+    GLI_LOAD_PROC_ADDRESS(glUniform1uiv);
+    GLI_LOAD_PROC_ADDRESS(glUniform2uiv);
+    GLI_LOAD_PROC_ADDRESS(glUniform3uiv);
+    GLI_LOAD_PROC_ADDRESS(glUniform4uiv);
+    GLI_LOAD_PROC_ADDRESS(glUniformMatrix4fv);
+
+    glGenBuffers(1, &built_ins_uniform_buffer);
+    glBindBuffer(GL_UNIFORM_BUFFER, built_ins_uniform_buffer);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(built_ins_t), NULL, GL_STREAM_DRAW);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, built_ins_uniform_buffer, 0, sizeof(built_ins_t));
+
+    glGenVertexArrays(1, &attributeless_vertex_array);
+  }
+}
+
+static void OnRemoveWindow(ecs_iter_t* it) {
+  const GLitchWindow* window = ecs_field(it, GLitchWindow, 0);
+#ifdef GLI_LINUX
+  glXMakeCurrent(window->display, None, NULL);
+  glXDestroyContext(window->display, window->context);
+  XDestroyWindow(window->display, window->window);
+  XCloseDisplay(window->display);
+#elif defined(GLI_WINDOWS)
+  wglMakeCurrent(NULL, NULL);
+  wglDeleteContext(window->context);
+  ReleaseDC(window->window_handle, window->device_context_handle);
+  DestroyWindow(window->window_handle);
+#elif defined(GLI_EMSCRIPTEN)
+  (void)window;
+#endif
+}
 
 void glitchImport(ecs_world_t* world) {
   ECS_MODULE(world, glitch);
 
   ECS_IMPORT(world, cvkm);
 
-  ecs_atfini(world, fini, NULL);
-
+  ecs_id(Window) = ecs_component(world, {
+    .entity = ecs_entity(world, {
+      .id = ecs_id(Window),
+      .use_low_id = true,
+      .name = "Window",
+      .symbol = "Window",
+    }),
+    .type = {
+      .size = sizeof(GLitchWindow),
+      .alignment = alignof(GLitchWindow),
+    },
+  });
   ECS_COMPONENT_DEFINE(world, MeshData);
   ECS_COMPONENT_DEFINE(world, Mesh);
   ECS_COMPONENT_DEFINE(world, ShaderProgramSource);
@@ -1142,6 +1512,12 @@ void glitchImport(ecs_world_t* world) {
   }\
 )
 
+  ecs_set_hooks(world, Window, {
+    .ctor = ecs_ctor(GLitchWindow),
+    .copy = ecs_copy(GLitchWindow),
+    .move = ecs_move(GLitchWindow),
+    .dtor = ecs_dtor(GLitchWindow),
+  });
   GLI_SET_HOOKS(MeshData);
   GLI_SET_HOOKS(Mesh);
   GLI_SET_HOOKS(ShaderProgramSource);
@@ -1151,264 +1527,8 @@ void glitchImport(ecs_world_t* world) {
   ecs_set_hooks(world, Color, { .ctor = ecs_ctor(Color) });
   ecs_set_hooks(world, ClearColor, { .ctor = ecs_ctor(ClearColor) });
 
-  static const char* window_name = "GLitch";
-
-#ifdef GLI_LINUX
-  display = XOpenDisplay(NULL);
-  if (!display) {
-    fprintf(stderr, "Cannot open display.\n");
-    return;
-  }
-
-  // Attributes for the framebuffer configuration
-  static int visual_attribs[] = {
-    GLX_X_RENDERABLE, True,
-    GLX_DRAWABLE_TYPE, GLX_WINDOW_BIT,
-    GLX_RENDER_TYPE, GLX_RGBA_BIT,
-    GLX_X_VISUAL_TYPE, GLX_TRUE_COLOR,
-    GLX_RED_SIZE, 8,
-    GLX_GREEN_SIZE, 8,
-    GLX_BLUE_SIZE, 8,
-    GLX_ALPHA_SIZE, 8,
-    GLX_DEPTH_SIZE, 24,
-    GLX_STENCIL_SIZE, 0,
-    GLX_DOUBLEBUFFER, True,
-    None
-  };
-
-  int framebuffer_count;
-  GLXFBConfig* framebuffer_config = glXChooseFBConfig(
-    display,
-    DefaultScreen(display),
-    visual_attribs,
-    &framebuffer_count
-  );
-  if (!framebuffer_config) {
-    fprintf(stderr, "Failed to retrieve a framebuffer configuration.\n");
-    return;
-  }
-  // Pick the first suitable framebuffer configuration.
-  GLXFBConfig best_config = framebuffer_config[0];
-  XFree(framebuffer_config);
-
-  // Get a visual info from the framebuffer configuration.
-  XVisualInfo* visual_info = glXGetVisualFromFBConfig(display, best_config);
-  if (!visual_info) {
-    fprintf(stderr, "No appropriate visual found.\n");
-    return;
-  }
-
-  const Window root_window = RootWindow(display, visual_info->screen);
-
-  // Create a colormap and set window attributes.
-  XSetWindowAttributes set_window_attributes = {
-    .background_pixmap = None,
-    .event_mask = StructureNotifyMask | ExposureMask | KeyPressMask,
-    .colormap = XCreateColormap(display, root_window, visual_info->visual, AllocNone),
-  };
-
-  window = XCreateWindow(
-    display,
-    root_window,
-    0,
-    0,
-    GLI_INITIAL_WIDTH,
-    GLI_INITIAL_HEIGHT,
-    0,
-    visual_info->depth,
-    InputOutput,
-    visual_info->visual,
-    CWBorderPixel | CWColormap | CWEventMask,
-    &set_window_attributes
-  );
-  XFree(visual_info);
-
-  if (!window) {
-    fprintf(stderr, "Failed to create window.\n");
-    return;
-  }
-
-  wm_delete = XInternAtom(display, "WM_DELETE_WINDOW", False);
-  XSetWMProtocols(display, window, &wm_delete, 1);
-
-  XStoreName(display, window, window_name);
-  XMapWindow(display, window);
-
-  // Get the pointer to glXCreateContextAttribsARB for modern context creation
-  glXCreateContextAttribsARBProc glXCreateContextAttribsARB =
-    (glXCreateContextAttribsARBProc)glXGetProcAddressARB((const GLubyte*)"glXCreateContextAttribsARB");
-
-  if (!glXCreateContextAttribsARB) {
-    fprintf(stderr, "Failed to get the address of glXCreateContextAttribsARB.\n");
-    return;
-  }
-
-  // Create a OpenGL context version 3.3
-  context = glXCreateContextAttribsARB(
-    display,
-    best_config,
-    0,
-    True,
-    (int[]){
-      GLX_CONTEXT_MAJOR_VERSION_ARB, 3,
-      GLX_CONTEXT_MINOR_VERSION_ARB, 3,
-      GLX_CONTEXT_PROFILE_MASK_ARB,
-      GLX_CONTEXT_CORE_PROFILE_BIT_ARB,
-      None,
-    }
-  );
-  if (!context) {
-    fprintf(stderr, "Failed to create OpenGL 3.3 context.\n");
-    return;
-  }
-
-  // Make the context current
-  glXMakeCurrent(display, window, context);
-#else
-  static const char* class_name = "GLitchWindowClass";
-
-  if (!RegisterClass(
-    &(WNDCLASS) {
-      .style = CS_OWNDC,
-      .lpfnWndProc = window_proc,
-      .hInstance = GetModuleHandle(NULL),
-      .hCursor = LoadCursor(NULL, IDC_ARROW),
-      .lpszClassName = class_name,
-    }
-  )) {
-    MessageBox(NULL, "Failed to register window class.", "Error", MB_OK);
-    return;
-  }
-
-  window_handle = CreateWindowEx(
-    0,
-    class_name,
-    window_name,
-    WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-    CW_USEDEFAULT,
-    CW_USEDEFAULT,
-    GLI_INITIAL_WIDTH,
-    GLI_INITIAL_HEIGHT,
-    NULL,
-    NULL,
-    GetModuleHandle(NULL),
-    NULL
-  );
-  if (!window_handle) {
-    MessageBox(NULL, "Failed to create window.", "Error", MB_OK);
-    return;
-  }
-
-  device_context_handle = GetDC(window_handle);
-
-  // Set up the pixel format descriptor.
-  const PIXELFORMATDESCRIPTOR pixel_format_descriptor = {
-    .nSize = sizeof(PIXELFORMATDESCRIPTOR),
-    .nVersion = 1,
-    .dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
-    .iPixelType = PFD_TYPE_RGBA,
-    .cColorBits = 32,
-    .cDepthBits = 24,
-    .cStencilBits = 0,
-    .iLayerType = PFD_MAIN_PLANE,
-  };
-
-  const int pixel_format = ChoosePixelFormat(device_context_handle, &pixel_format_descriptor);
-  if (pixel_format == 0) {
-    MessageBox(NULL, "Failed to choose pixel format.", "Error", MB_OK);
-    return;
-  }
-
-  if (!SetPixelFormat(device_context_handle, pixel_format, &pixel_format_descriptor)) {
-    MessageBox(NULL, "Failed to set pixel format.", "Error", MB_OK);
-    return;
-  }
-
-  const HGLRC dummy_context_handle = wglCreateContext(device_context_handle);
-  if (!dummy_context_handle) {
-    MessageBox(NULL, "Failed to create dummy OpenGL context.", "Error", MB_OK);
-    return;
-  }
-
-  if (!wglMakeCurrent(device_context_handle, dummy_context_handle)) {
-    MessageBox(NULL, "Failed to activate dummy OpenGL context.", "Error", MB_OK);
-    return;
-  }
-
-  const PFNWGLCREATECONTEXTATTRIBSARBPROC wglCreateContextAttribsARB =
-    (PFNWGLCREATECONTEXTATTRIBSARBPROC)wglGetProcAddress("wglCreateContextAttribsARB");
-
-  if (!wglCreateContextAttribsARB) {
-    MessageBox(NULL, "Failed to get the address of wglCreateContextAttribsARB", "Error", MB_OK);
-    return;
-  }
-
-  context = wglCreateContextAttribsARB(
-    device_context_handle,
-    0,
-    (int[]) {
-      WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
-      WGL_CONTEXT_MINOR_VERSION_ARB, 3,
-      WGL_CONTEXT_PROFILE_MASK_ARB,
-      WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
-      0,
-    }
-  );
-
-  if (!context) {
-    MessageBox(NULL, "Failed to create OpenGL 3.3 context.", "Error", MB_OK);
-    return;
-  }
-
-  wglMakeCurrent(device_context_handle, context);
-  wglDeleteContext(dummy_context_handle);
-#endif
-
-  glEnable(GL_DEPTH_TEST);
-  glEnable(GL_CULL_FACE);
-  glEnable(GL_PROGRAM_POINT_SIZE);
-
-  GLI_LOAD_PROC_ADDRESS(glCreateShader);
-  GLI_LOAD_PROC_ADDRESS(glDeleteShader);
-  GLI_LOAD_PROC_ADDRESS(glShaderSource);
-  GLI_LOAD_PROC_ADDRESS(glCompileShader);
-  GLI_LOAD_PROC_ADDRESS(glGetShaderiv);
-  GLI_LOAD_PROC_ADDRESS(glGetShaderInfoLog);
-  GLI_LOAD_PROC_ADDRESS(glCreateProgram);
-  GLI_LOAD_PROC_ADDRESS(glDeleteProgram);
-  GLI_LOAD_PROC_ADDRESS(glAttachShader);
-  GLI_LOAD_PROC_ADDRESS(glLinkProgram);
-  GLI_LOAD_PROC_ADDRESS(glGetProgramiv);
-  GLI_LOAD_PROC_ADDRESS(glGetProgramInfoLog);
-  GLI_LOAD_PROC_ADDRESS(glGetActiveAttrib);
-  GLI_LOAD_PROC_ADDRESS(glGetActiveUniform);
-  GLI_LOAD_PROC_ADDRESS(glGetAttribLocation);
-  GLI_LOAD_PROC_ADDRESS(glGetUniformLocation);
-  GLI_LOAD_PROC_ADDRESS(glGenVertexArrays);
-  GLI_LOAD_PROC_ADDRESS(glDeleteVertexArrays);
-  GLI_LOAD_PROC_ADDRESS(glBindVertexArray);
-  GLI_LOAD_PROC_ADDRESS(glGenBuffers);
-  GLI_LOAD_PROC_ADDRESS(glDeleteBuffers);
-  GLI_LOAD_PROC_ADDRESS(glBindBuffer);
-  GLI_LOAD_PROC_ADDRESS(glBindBufferRange);
-  GLI_LOAD_PROC_ADDRESS(glVertexAttribPointer);
-  GLI_LOAD_PROC_ADDRESS(glVertexAttribIPointer);
-  GLI_LOAD_PROC_ADDRESS(glEnableVertexAttribArray);
-  GLI_LOAD_PROC_ADDRESS(glBufferData);
-  GLI_LOAD_PROC_ADDRESS(glUseProgram);
-  GLI_LOAD_PROC_ADDRESS(glUniform1fv);
-  GLI_LOAD_PROC_ADDRESS(glUniform2fv);
-  GLI_LOAD_PROC_ADDRESS(glUniform3fv);
-  GLI_LOAD_PROC_ADDRESS(glUniform4fv);
-  GLI_LOAD_PROC_ADDRESS(glUniform1iv);
-  GLI_LOAD_PROC_ADDRESS(glUniform2iv);
-  GLI_LOAD_PROC_ADDRESS(glUniform3iv);
-  GLI_LOAD_PROC_ADDRESS(glUniform4iv);
-  GLI_LOAD_PROC_ADDRESS(glUniform1uiv);
-  GLI_LOAD_PROC_ADDRESS(glUniform2uiv);
-  GLI_LOAD_PROC_ADDRESS(glUniform3uiv);
-  GLI_LOAD_PROC_ADDRESS(glUniform4uiv);
-  GLI_LOAD_PROC_ADDRESS(glUniformMatrix4fv);
+  ECS_OBSERVER(world, OnSetWindow, EcsOnSet, [inout] Window($));
+  ECS_OBSERVER(world, OnRemoveWindow, EcsOnRemove, [in] Window($));
 
   ECS_SYSTEM(world, MakeMeshes, EcsOnLoad, [in] MeshData, [out] !Mesh);
   ecs_system(world, {
@@ -1427,20 +1547,19 @@ void glitchImport(ecs_world_t* world) {
     [inout] ?Camera3D($),
     [in] ?cvkm.Position3D(Camera3D),
     [in] ?cvkm.Rotation3D(Camera3D),
+    [inout] Window($),
   );
-  ECS_SYSTEM(world, Render, EcsOnStore, [in] ShaderProgram, [in] ?Camera2D(Camera2D), [in] ?Camera3D(Camera3D));
-  ECS_SYSTEM(world, PostRenderFrame, EcsPostFrame, 0);
+  ECS_SYSTEM(world, Render, EcsOnStore,
+    [in] ShaderProgram,
+    [in] ?Camera2D(Camera2D),
+    [in] ?Camera3D(Camera3D),
+    [in] Window($),
+  );
+  ECS_SYSTEM(world, PostRenderFrame, EcsPostFrame, [in] Window($));
 
   ecs_singleton_add(world, ClearColor);
   ecs_singleton_add(world, Camera2D);
   ecs_singleton_add(world, Camera3D);
-
-  glGenBuffers(1, &built_ins_uniform_buffer);
-  glBindBuffer(GL_UNIFORM_BUFFER, built_ins_uniform_buffer);
-  glBufferData(GL_UNIFORM_BUFFER, sizeof(built_ins_t), NULL, GL_STREAM_DRAW);
-  glBindBufferRange(GL_UNIFORM_BUFFER, 0, built_ins_uniform_buffer, 0, sizeof(built_ins_t));
-
-  glGenVertexArrays(1, &attributeless_vertex_array);
 }
 
 #ifndef _MSC_VER
