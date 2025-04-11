@@ -47,5 +47,11 @@ endif()
 target_include_directories(tests PRIVATE include libs/cvkm libs/flecs libs/glitch)
 
 if(EMSCRIPTEN)
+  set(CANVAS_SELECTOR "#canvas" CACHE STRING "The CSS selector to use for the canvas we will render to.")
+  set(SCRIPT_NAME "tests" CACHE STRING "The name of the generated JavaScript and Wasm files.")
+
+  target_compile_options(tests PRIVATE -DGLI_CANVAS_SELECTOR=${CANVAS_SELECTOR})
+  set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME ${SCRIPT_NAME})
+
   configure_file(src/index.html ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
 endif()

@@ -18,6 +18,12 @@
 #include <flecs.h>
 #include <glitch.h>
 
+#ifdef GLI_EMSCRIPTEN
+#ifndef GLI_CANVAS_SELECTOR
+#define GLI_CANVAS_SELECTOR "#canvas"
+#endif
+#endif
+
 static GLuint attributeless_vertex_array;
 
 // The number of terms that we use in the ecs_query_desc_t::terms of the shader program.
@@ -1320,7 +1326,7 @@ static void OnSetWindow(ecs_iter_t* it) {
     wglMakeCurrent(window->device_context_handle, window->context);
     wglDeleteContext(dummy_context_handle);
 #elif defined(GLI_EMSCRIPTEN)
-    window->context = emscripten_webgl_create_context("#canvas", &(EmscriptenWebGLContextAttributes){
+    window->context = emscripten_webgl_create_context(GLI_CANVAS_SELECTOR, &(EmscriptenWebGLContextAttributes){
       .alpha = 0,
       .depth = 1,
       .stencil = 0,
@@ -1341,7 +1347,7 @@ static void OnSetWindow(ecs_iter_t* it) {
 
 #ifdef GLI_EMSCRIPTEN
     set_title(window->name ? window->name : default_window_name);
-    emscripten_set_canvas_element_size("#canvas", window->size.x, window->size.y);
+    emscripten_set_canvas_element_size(GLI_CANVAS_SELECTOR, window->size.x, window->size.y);
     glViewport(0, 0, window->size.x, window->size.y);
 #endif
 
